@@ -1,0 +1,112 @@
+import os
+import pandas as pd
+import warnings
+
+
+def read_csv(filename):
+    if not filename.endswith('.csv'):
+        print('Ошибка файл должен иметь расширение .csv')
+        return None
+    try:
+        data = pd.read_csv(f"data/{filename}", on_bad_lines='skip', sep=';')
+
+        return data
+    except FileNotFoundError:
+        print(f"Ошибка: Файл {filename} не найден.")
+        return None
+    except Exception as a:
+        print(f"Ошибка при чтении файла {a}")
+        return None
+
+
+def select_csv_file():
+    files = [filename for filename in os.listdir('data') if not filename.startswith('~') and filename.endswith('.csv')]
+    print('Доступные файлы для обработки')
+    for i, filename in enumerate(files, 1):
+        print(f"{i}.{filename}")
+    try:
+        choice = int(input("Выберите номер файла для обработки - "))
+        selected_file = files[choice - 1]
+        return selected_file
+    except(ValueError, IndexError):
+        print("Ошибка: Некорректный выбор файла")
+        return None
+
+
+def save_excel(df, domain, selected_csv_file):
+    folder = 'out'
+    os.makedirs(folder, exist_ok=True)
+
+    df = df.applymap(lambda x: x.encode('unicode_escape').
+                     decode('utf-8') if isinstance(x, str) else x)
+
+    output_filename = f"{folder}/{domain}_{selected_csv_file.replace('.csv', '_processed.xlsx')}"
+
+    options = {
+        'strings_to_formulas': False,
+        'strings_to_urls': False
+    }                                     #Решение проблемы большого количества url и формул листов
+
+    with pd.ExcelWriter(output_filename, engine_kwargs={'options': options}) as writer:
+        df.to_excel(
+            excel_writer=writer,
+            sheet_name='Лист1',
+            index=False,
+            engine='xlsxwriter'
+        )
+
+    print(f"Датасет групированный по domain сохранены")
+
+
+def split_save_by_domain(df, selected_csv_file):
+    # Грппируем фрейм по столбику domain, создаем row и расставляем маркеры (- по нечету)
+
+    grouped_dataframes = dict(tuple(df.groupby('domain')))
+    for domain, group_df in grouped_dataframes.items():
+        group_df['в работу взят'] = '+'
+        if len(group_df) % 2 != 0:
+            group_df.loc[group_df.index[-1], 'в работу взят'] = '-'
+        save_excel(group_df, domain, selected_csv_file)
+        process_grouped_dataframe(group_df, selected_csv_file)
+
+
+def process_grouped_dataframe(group_df, selected_csv_file):
+    new_data = {
+        'FILENAME': [],  # создаем и наполняем датасет
+        'INPUT:image': [],
+        'INPUT:image2': [],
+        'INPUT:domain': []
+    }
+
+    length = len(group_df)
+    for i in range(0, length - 1, 2):
+        if group_df['в работу взят'].iloc[i] != '-':
+            image_name1 = group_df['image_name'].iloc[i]
+            image_name2 = group_df['image_name'].iloc[i + 1]
+            new_data['FILENAME'].append(f"{image_name1}_{image_name2}")
+            new_data['INPUT:image'].append(group_df['INPUT: image'].iloc[i])
+            new_data['INPUT:image2'].append(group_df['INPUT: image'].iloc[i + 1])
+            new_data['INPUT:domain'].append(group_df['domain'].iloc[i])
+
+    new_df = pd.DataFrame(new_data)
+    new_df = new_df.applymap(lambda x: x.encode('unicode_escape').
+                             decode('utf-8') if isinstance(x, str) else x)
+    output_folder = 'out'
+    os.makedirs(output_folder, exist_ok=True)
+    output_filename = os.path.join(output_folder,
+                                   f"{group_df['domain'].iloc[0]}_{selected_csv_file.replace('.csv', '_in_work.xlsx')}")
+    new_df.to_excel(output_filename, index=False, engine='openpyxl')
+    print(f"Новый датасет сохранен ")
+
+
+if __name__ == '__main__':
+    warnings.simplefilter(action='ignore', category=FutureWarning)
+    selected_csv_file = select_csv_file()
+
+    if selected_csv_file:
+
+        df = read_csv(selected_csv_file)
+
+        if df is not None:
+            split_save_by_domain(df, selected_csv_file)
+    input("Нажмите Enter для выхода")
